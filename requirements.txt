@@ -1,0 +1,5 @@
+-r https://raw.githubusercontent.com/mila-udem/blocks/stable/requirements.txt
+
+--allow-unverified blocks
+--allow-external blocks
+git+https://github.com/mila-udem/blocks.git@stable#egg=blocks
