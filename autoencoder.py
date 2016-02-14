@@ -25,11 +25,11 @@ def get_typical_layer(input_layer, input_dim, output_dim):
   layer.initialize()
   return Tanh().apply(layer.apply(input_layer))
 
-def get_data_stream(train=True):
+def get_data_stream(train=True, batch_size=100):
   mnist_id = "train" if train else "test"
   mnist = MNIST((mnist_id, ), sources=["features"])
   return Flatten(DataStream.default_stream(mnist, iteration_scheme=\
-      ShuffledScheme(examples=mnist.num_examples, batch_size=100)))
+      ShuffledScheme(examples=mnist.num_examples, batch_size=batch_size)))
 # to get an example
 # example = ds.get_epoch_iterator().next()[0][0] # [sources][no-in-batch]
 
