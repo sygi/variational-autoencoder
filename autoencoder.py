@@ -4,7 +4,7 @@ from fuel.streams import DataStream
 from fuel.schemes import ShuffledScheme
 from fuel.transformers import Flatten
 from theano import tensor
-from blocks.bricks import Linear, Tanh
+from blocks.bricks import Linear, Tanh, Logistic
 from blocks.initialization import IsotropicGaussian, Constant
 from blocks.filter import VariableFilter
 
@@ -18,12 +18,12 @@ def plot_images(orig, compressed, first):
   else:
     plt.draw()
 
-def get_typical_layer(input_layer, input_dim, output_dim):
+def get_typical_layer(input_layer, input_dim, output_dim, transformation=Logistic()):
   layer = Linear(input_dim=input_dim, output_dim=output_dim)
   layer.weights_init = IsotropicGaussian(0.01)
   layer.biases_init = Constant(0)
   layer.initialize()
-  return Tanh().apply(layer.apply(input_layer))
+  return transformation.apply(layer.apply(input_layer))
 
 def get_data_stream(train=True, batch_size=100):
   mnist_id = "train" if train else "test"
@@ -33,14 +33,14 @@ def get_data_stream(train=True, batch_size=100):
 # to get an example
 # example = ds.get_epoch_iterator().next()[0][0] # [sources][no-in-batch]
 
-def showcase(cg, output_name="tanh_apply_output"):
+def showcase(cg, output_name="tanh_apply_output", number=-1):
   import numpy
   import time
   first = True
   test_ds = get_data_stream(False)
   for image in next(test_ds.get_epoch_iterator())[0]:
     cg2 = cg.replace({cg.inputs[0]: numpy.asmatrix(image)})
-    out = (VariableFilter(theano_name_regex=output_name) (cg2.variables))[-1]
+    out = (VariableFilter(theano_name_regex=output_name) (cg2.variables))[number]
     plot_images(image, out.eval(), first)
     first = False
     time.sleep(1)
@@ -54,25 +54,29 @@ def main():
 
   latent_to_hidden2 = get_typical_layer(hidden1_to_latent, 20, 500)
   #hidden3_to_hidden4 = get_typical_layer(latent_to_hidden3, 300, 500)
-  hidden2_to_output = get_typical_layer(latent_to_hidden2, 500, 784)
+  hidden2_to_output = get_typical_layer(latent_to_hidden2, 500, 784, Logistic())
+  hidden2_to_output.name = "last_before_output"
 
-  from blocks.bricks.cost import SquaredError, AbsoluteError
+  from blocks.bricks.cost import SquaredError, AbsoluteError, BinaryCrossEntropy
   from blocks.graph import ComputationGraph
   from blocks.algorithms import Adam, GradientDescent, Scale
   from blocks.roles import WEIGHT
 
-  cost = AbsoluteError(name="error").apply(x, hidden2_to_output)
+  cost = BinaryCrossEntropy(name="error").apply(x, hidden2_to_output)
   cg = ComputationGraph(cost)
+  weights = VariableFilter(roles=[WEIGHT]) (cg.variables)
+#  cost += 0.0001 * tensor.sum(map(lambda x: (x**2).sum(), weights))
+#  cost.name = "regularized error"
   gd = GradientDescent(cost=cost, parameters=cg.parameters, step_rule=Adam())
 
   from blocks.main_loop import MainLoop
   from blocks.extensions import FinishAfter, Printing, ProgressBar
   from blocks.extensions.monitoring import DataStreamMonitoring, TrainingDataMonitoring
   monitor = TrainingDataMonitoring([cost], after_epoch=True)
-  main_loop = MainLoop(data_stream=get_data_stream(), algorithm=gd, extensions=[monitor, FinishAfter(after_n_epochs=4),  ProgressBar(), Printing()])
+  main_loop = MainLoop(data_stream=get_data_stream(), algorithm=gd, extensions=[monitor, FinishAfter(after_n_epochs=5),  ProgressBar(), Printing()])
 
   main_loop.run()
-  showcase(cg)
+  showcase(cg, "last_before_output")
 
 if __name__ == "__main__":
   main()

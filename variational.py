@@ -7,8 +7,9 @@ from blocks.initialization import IsotropicGaussian, Constant
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 L = 1
-BATCH_SIZE = 20
-J = 20 # latent dimension
+BATCH_SIZE = 100
+J = 10 # latent dimension
+L = 5 # TODO
 
 def plot_batch(orig, compressed):
   for i in range(len(orig)):
@@ -35,16 +36,16 @@ def showcase(cg, output_name="last_apply_output"):
 
 def encoder_network(latent_dim=J):
   x = tensor.matrix("features")
-  hidden1 = get_typical_layer(x, 784, 500)
-  log_sigma_sq = get_typical_layer(hidden1, 500, latent_dim)
-  mu = get_typical_layer(hidden1, 500, latent_dim)
+  hidden1 = get_typical_layer(x, 784, 500, Logistic())
+  log_sigma_sq = get_typical_layer(hidden1, 500, latent_dim, Logistic())
+  mu = get_typical_layer(hidden1, 500, latent_dim, Logistic())
   return (log_sigma_sq, mu, x)
 
 def decoder_network(latent_sample, latent_dim=J):
   # bernoulli case
-  hidden2 = get_typical_layer(latent_sample, latent_dim, 500)
+  hidden2 = get_typical_layer(latent_sample, latent_dim, 500, Logistic())
   hidden2_to_output = Linear(name="last", input_dim=500, output_dim=784)
-  hidden2_to_output.weights_init = IsotropicGaussian(0.02)
+  hidden2_to_output.weights_init = IsotropicGaussian(0.01)
   hidden2_to_output.biases_init = Constant(0)
   hidden2_to_output.initialize()
   return Logistic().apply(hidden2_to_output.apply(hidden2))
@@ -55,16 +56,16 @@ def get_cost(latent_dim=J):
   log_sigma_sq, mu, x = encoder_network(latent_dim)
   sigma_sq = tensor.exp(log_sigma_sq)
   eps = rng.normal((BATCH_SIZE, J))
-  z = tensor.sqrt(sigma_sq) + mu * eps
+  z = mu + tensor.sqrt(tensor.exp(0.5 * log_sigma_sq)) * eps
   y = decoder_network(z) # TODO: L > 1
-  log_p_x_y = tensor.sum(tensor.log(y) * x + (1 - x) * tensor.log(1 - y))
-  KL = -0.5 * tensor.sum(1 + log_sigma_sq - mu ** 2 - sigma_sq)
+  log_p_x_y = tensor.sum(tensor.log(y) * x + (1 - x) * tensor.log(1 - y), axis=1)
+  KL = -0.5 * tensor.sum(1 + log_sigma_sq - mu * mu - sigma_sq, axis=1)
   cost = -tensor.mean(-KL + log_p_x_y) # over batch
   cost.name = "cost"
-  return cost * BATCH_SIZE # to have comparable costs for different batch sizes
+  return cost 
 
 from blocks.graph import ComputationGraph
-from blocks.algorithms import GradientDescent, Scale, Adam
+from blocks.algorithms import GradientDescent, Scale, Adam, RMSProp, AdaGrad
 from blocks.filter import VariableFilter
 from blocks.main_loop import MainLoop
 from blocks.extensions import FinishAfter, Printing, ProgressBar
@@ -76,8 +77,8 @@ gd = GradientDescent(cost=cost, parameters=cg.parameters,
     step_rule=Adam())
 monitor = TrainingDataMonitoring([cost], after_epoch=True)
 main_loop = MainLoop(data_stream = get_data_stream(True, BATCH_SIZE), algorithm=gd, extensions=[
-  monitor, FinishAfter(after_n_epochs=5), ProgressBar(), Printing()])
+  monitor, FinishAfter(after_n_epochs=10), ProgressBar(), Printing()])
 
 main_loop.run()
 
-showcase(cg, "last_apply_output")
+showcase(cg, "logistic")
